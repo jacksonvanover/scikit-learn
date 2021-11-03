@@ -60,6 +60,8 @@ cdef class Splitter:
     cdef const DOUBLE_t[:, ::1] y
     cdef DOUBLE_t* sample_weight
 
+    cdef SIZE_t chosen_feature
+
     # The samples vector `samples` is maintained by the Splitter object such
     # that the samples contained in a node are contiguous. With this setting,
     # `node_split` reorganizes the node samples `samples[start:end]` in two

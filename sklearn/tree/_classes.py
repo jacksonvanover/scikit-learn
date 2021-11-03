@@ -52,6 +52,7 @@ __all__ = [
     "DecisionTreeRegressor",
     "ExtraTreeClassifier",
     "ExtraTreeRegressor",
+    "SensitivityTree"
 ]
 
 
@@ -73,7 +74,11 @@ CRITERIA_REG = {
     "poisson": _criterion.Poisson,
 }
 
-DENSE_SPLITTERS = {"best": _splitter.BestSplitter, "random": _splitter.RandomSplitter}
+DENSE_SPLITTERS = {
+    "best": _splitter.BestSplitter,
+    "random": _splitter.RandomSplitter,
+    "first_order" : _splitter.FirstOrderSplitter,
+}
 
 SPARSE_SPLITTERS = {
     "best": _splitter.BestSparseSplitter,
@@ -148,7 +153,7 @@ class BaseDecisionTree(MultiOutputMixin, BaseEstimator, metaclass=ABCMeta):
         return self.tree_.n_leaves
 
     def fit(
-        self, X, y, sample_weight=None, check_input=True, X_idx_sorted="deprecated"
+        self, X, y, sample_weight=None, check_input=True, X_idx_sorted="deprecated", chosen_feature=-1
     ):
 
         random_state = check_random_state(self.random_state)
@@ -384,6 +389,7 @@ class BaseDecisionTree(MultiOutputMixin, BaseEstimator, metaclass=ABCMeta):
                 min_samples_leaf,
                 min_weight_leaf,
                 random_state,
+                chosen_feature
             )
 
         if is_classifier(self):
@@ -628,7 +634,12 @@ class BaseDecisionTree(MultiOutputMixin, BaseEstimator, metaclass=ABCMeta):
         """
         check_is_fitted(self)
 
-        return self.tree_.compute_feature_importances()
+        if self.splitter == "first_order":
+            normalize = False
+        else:
+            normalize = True
+
+        return self.tree_.compute_feature_importances(normalize=normalize)
 
 
 # =============================================================================
@@ -1276,7 +1287,7 @@ class DecisionTreeRegressor(RegressorMixin, BaseDecisionTree):
         )
 
     def fit(
-        self, X, y, sample_weight=None, check_input=True, X_idx_sorted="deprecated"
+        self, X, y, sample_weight=None, check_input=True, X_idx_sorted="deprecated", chosen_feature=-1
     ):
         """Build a decision tree regressor from the training set (X, y).
 
@@ -1318,6 +1329,7 @@ class DecisionTreeRegressor(RegressorMixin, BaseDecisionTree):
             sample_weight=sample_weight,
             check_input=check_input,
             X_idx_sorted=X_idx_sorted,
+            chosen_feature=chosen_feature
         )
         return self
 
@@ -1823,6 +1835,36 @@ class ExtraTreeRegressor(DecisionTreeRegressor):
         *,
         criterion="squared_error",
         splitter="random",
+        max_depth=None,
+        min_samples_split=2,
+        min_samples_leaf=1,
+        min_weight_fraction_leaf=0.0,
+        max_features="auto",
+        random_state=None,
+        min_impurity_decrease=0.0,
+        max_leaf_nodes=None,
+        ccp_alpha=0.0,
+    ):
+        super().__init__(
+            criterion=criterion,
+            splitter=splitter,
+            max_depth=max_depth,
+            min_samples_split=min_samples_split,
+            min_samples_leaf=min_samples_leaf,
+            min_weight_fraction_leaf=min_weight_fraction_leaf,
+            max_features=max_features,
+            max_leaf_nodes=max_leaf_nodes,
+            min_impurity_decrease=min_impurity_decrease,
+            random_state=random_state,
+            ccp_alpha=ccp_alpha,
+        )
+
+class SensitivityTree(DecisionTreeRegressor):
+    def __init__(
+        self,
+        *,
+        criterion="squared_error",
+        splitter="first_order",
         max_depth=None,
         min_samples_split=2,
         min_samples_leaf=1,
