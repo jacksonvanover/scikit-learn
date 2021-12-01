@@ -59,6 +59,7 @@ from ..tree import (
     DecisionTreeRegressor,
     ExtraTreeClassifier,
     ExtraTreeRegressor,
+    SensitivityTree,
 )
 from ..tree._tree import DTYPE, DOUBLE
 from ..utils import check_random_state, compute_sample_weight, deprecated
@@ -76,6 +77,7 @@ __all__ = [
     "ExtraTreesClassifier",
     "ExtraTreesRegressor",
     "RandomTreesEmbedding",
+    "SensitivityForest",
 ]
 
 MAX_INT = np.iinfo(np.int32).max
@@ -155,6 +157,7 @@ def _parallel_build_trees(
     verbose=0,
     class_weight=None,
     n_samples_bootstrap=None,
+    chosen_feature=-1
 ):
     """
     Private function used to fit a single tree in parallel."""
@@ -181,9 +184,10 @@ def _parallel_build_trees(
         elif class_weight == "balanced_subsample":
             curr_sample_weight *= compute_sample_weight("balanced", y, indices=indices)
 
-        tree.fit(X, y, sample_weight=curr_sample_weight, check_input=False)
+        tree.fit(X, y, sample_weight=curr_sample_weight, check_input=False, chosen_feature=chosen_feature)
+
     else:
-        tree.fit(X, y, sample_weight=sample_weight, check_input=False)
+        tree.fit(X, y, sample_weight=sample_weight, check_input=False, chosen_feature=chosen_feature)
 
     return tree
 
@@ -293,7 +297,7 @@ class BaseForest(MultiOutputMixin, BaseEnsemble, metaclass=ABCMeta):
 
         return sparse_hstack(indicators).tocsr(), n_nodes_ptr
 
-    def fit(self, X, y, sample_weight=None):
+    def fit(self, X, y, sample_weight=None, chosen_feature=-1):
         """
         Build a forest of trees from the training set (X, y).
 
@@ -320,6 +324,7 @@ class BaseForest(MultiOutputMixin, BaseEnsemble, metaclass=ABCMeta):
         self : object
             Fitted estimator.
         """
+
         # Validate or convert input data
         if issparse(y):
             raise ValueError("sparse multilabel-indicator for y is not supported.")
@@ -454,6 +459,7 @@ class BaseForest(MultiOutputMixin, BaseEnsemble, metaclass=ABCMeta):
                     verbose=self.verbose,
                     class_weight=self.class_weight,
                     n_samples_bootstrap=n_samples_bootstrap,
+                    chosen_feature = chosen_feature,
                 )
                 for i, t in enumerate(trees)
             )
@@ -2342,6 +2348,83 @@ class ExtraTreesRegressor(ForestRegressor):
         self.min_impurity_decrease = min_impurity_decrease
         self.ccp_alpha = ccp_alpha
 
+class SensitivityForest(ForestRegressor):
+
+    def __init__(
+        self,
+        n_estimators=100,
+        *,
+        criterion="squared_error",
+        max_depth=None,
+        min_samples_split=2,
+        min_samples_leaf=1,
+        min_weight_fraction_leaf=0.0,
+        max_features="auto",
+        max_leaf_nodes=None,
+        min_impurity_decrease=0.0,
+        bootstrap=False,
+        oob_score=False,
+        n_jobs=None,
+        random_state=None,
+        verbose=0,
+        warm_start=False,
+        ccp_alpha=0.0,
+        max_samples=None,
+    ):
+        super().__init__(
+            base_estimator=SensitivityTree(),
+            n_estimators=n_estimators,
+            estimator_params=(
+                "criterion",
+                "splitter",
+                "max_depth",
+                "min_samples_split",
+                "min_samples_leaf",
+                "min_weight_fraction_leaf",
+                "max_features",
+                "max_leaf_nodes",
+                "min_impurity_decrease",
+                "random_state",
+                "ccp_alpha",
+            ),
+            bootstrap=bootstrap,
+            oob_score=oob_score,
+            n_jobs=n_jobs,
+            random_state=random_state,
+            verbose=verbose,
+            warm_start=warm_start,
+            max_samples=max_samples,
+        )
+
+        self.criterion = criterion
+        self.splitter = "total_order"
+        self.max_depth = max_depth
+        self.min_samples_split = min_samples_split
+        self.min_samples_leaf = min_samples_leaf
+        self.min_weight_fraction_leaf = min_weight_fraction_leaf
+        self.max_features = max_features
+        self.max_leaf_nodes = max_leaf_nodes
+        self.min_impurity_decrease = min_impurity_decrease
+        self.ccp_alpha = ccp_alpha
+
+    def calculate_sensitivity_index(self, Y):
+        check_is_fitted(self)
+
+        all_importances = Parallel(
+            n_jobs=self.n_jobs, **_joblib_parallel_args(prefer="threads")
+        )(
+            delayed(getattr)(tree, "feature_importances_")
+            for tree in self.estimators_
+            if tree.tree_.node_count > 1
+        )
+
+        if not all_importances:
+            return np.zeros(self.n_features_in_, dtype=np.float64)
+
+        all_importances = np.mean(all_importances, axis=0, dtype=np.float64)
+        return np.var(Y) - np.sum(all_importances)
+
+
 
 class RandomTreesEmbedding(BaseForest):
     """
@@ -2599,6 +2682,7 @@ class RandomTreesEmbedding(BaseForest):
         self : object
             Returns the instance itself.
         """
+
         self.fit_transform(X, y, sample_weight=sample_weight)
         return self
 

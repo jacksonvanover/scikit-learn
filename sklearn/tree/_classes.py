@@ -78,6 +78,7 @@ DENSE_SPLITTERS = {
     "best": _splitter.BestSplitter,
     "random": _splitter.RandomSplitter,
     "first_order" : _splitter.FirstOrderSplitter,
+    "total_order" : _splitter.TotalOrderSplitter,
 }
 
 SPARSE_SPLITTERS = {
@@ -634,7 +635,7 @@ class BaseDecisionTree(MultiOutputMixin, BaseEstimator, metaclass=ABCMeta):
         """
         check_is_fitted(self)
 
-        if self.splitter == "first_order":
+        if self.splitter in ["total_order", "first_order"]:
             normalize = False
         else:
             normalize = True
